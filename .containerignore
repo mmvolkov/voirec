@@ -1,0 +1,16 @@
+.venv/
+.uv/
+__pycache__/
+*.py[cod]
+.git/
+models/
+*.pt
+*.pth
+*.wav
+*.mp3
+*.flac
+*.ogg
+*_whisper.txt
+*_vosk.txt
+*_qwen.txt
+hf_cache/

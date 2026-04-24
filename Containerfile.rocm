@@ -1,0 +1,53 @@
+FROM docker.io/python:3.12-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+COPY pyproject.toml uv.lock README.md ./
+COPY src/ ./src/
+
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
+# Install base deps, then swap onnxruntime → onnxruntime-rocm
+# AMD публикует пакеты на своём индексе (PyPI содержит только старые версии)
+RUN uv sync --frozen --no-dev --no-editable --extra diarize \
+    && uv pip install --python /app/.venv/bin/python setuptools \
+    && uv pip install --python /app/.venv/bin/python \
+       --index-url https://download.pytorch.org/whl/rocm7.1 \
+       torch --upgrade \
+    && uv pip install --python /app/.venv/bin/python \
+       --extra-index-url https://download.onnxruntime.ai/ \
+       "onnxruntime-rocm>=1.20.0" --upgrade
+
+# ─────────────────────────────────────────────────────────────
+FROM docker.io/python:3.12-slim-bookworm AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r voirec && useradd -r -g voirec voirec
+
+WORKDIR /app
+
+COPY --from=builder /app/.venv /app/.venv
+COPY src/ ./src/
+
+ENV HF_HOME=/app/hf_cache
+ENV PATH="/app/.venv/bin:$PATH"
+# Говорим onnxruntime использовать ROCm (MIOpen) провайдер
+ENV ONNXRUNTIME_PROVIDER=ROCMExecutionProvider
+# Numba/librosa: кэш JIT в writable директорию
+ENV NUMBA_CACHE_DIR=/tmp/numba_cache
+
+RUN mkdir -p /app/hf_cache && chown -R voirec:voirec /app/hf_cache
+
+USER voirec
+
+EXPOSE 8000
+
+CMD ["voirec-api", "--host", "0.0.0.0", "--port", "8000"]

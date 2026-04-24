@@ -1,0 +1,42 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# uv
+.uv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Результаты транскрибации
+*_whisper.txt
+*_vosk.txt
+*_qwen.txt
+
+# Модели
+models/
+*.pt
+*.pth
+
+# Тестовые аудио
+*.wav
+*.mp3
+*.flac
+*.ogg

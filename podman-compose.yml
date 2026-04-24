@@ -1,0 +1,81 @@
+version: "3.9"
+
+services:
+  voirec-api:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: voirec-api:cpu
+    container_name: voirec-api
+    profiles: ["cpu", "default"]
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HF_HOME: /app/hf_cache
+    volumes:
+      - hf_cache:/app/hf_cache
+    restart: unless-stopped
+
+  voirec-api-cuda:
+    build:
+      context: .
+      dockerfile: Containerfile.cuda
+    image: voirec-api:cuda
+    container_name: voirec-api-cuda
+    profiles: ["cuda"]
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HF_HOME: /app/hf_cache
+    volumes:
+      - hf_cache:/app/hf_cache
+    restart: unless-stopped
+    # NVIDIA CDI (Podman 4.1+, требует настроенного nvidia-ctk)
+    devices:
+      - nvidia.com/gpu=all
+
+  voirec-api-rocm:
+    build:
+      context: .
+      dockerfile: Containerfile.rocm
+    image: voirec-api:rocm
+    container_name: voirec-api-rocm
+    profiles: ["rocm"]
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HF_HOME: /app/hf_cache
+      # Если карта не определяется автоматически (напр. RDNA3 в старом ROCm),
+      # раскомментируй и укажи свой gfx-версию: gfx1100 = RX 7900, gfx1030 = RX 6800 и т.д.
+      # HSA_OVERRIDE_GFX_VERSION: "11.0.0"
+    volumes:
+      - hf_cache:/app/hf_cache
+    restart: unless-stopped
+    # AMD GPU: kfd для HSA compute, dri для рендера/display
+    # Требования на хосте: пользователь должен быть в группах video и render
+    #   sudo usermod -aG video,render $USER
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    # Передаём GID групп video и render из хоста в контейнер.
+    # Узнать GID: getent group video render
+    group_add:
+      - "26"   # video
+      - "303"  # render
+    # ROCm активно использует shared memory для межпроцессного взаимодействия
+    ipc: host
+    # Некоторые операции ROCm требуют доступа к /proc/self/mem
+    security_opt:
+      - seccomp=unconfined
+
+volumes:
+  hf_cache:
