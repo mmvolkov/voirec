@@ -20,6 +20,15 @@ def _get_channel_count(audio_path: str) -> int:
     return int(result.stdout.strip())
 
 
+def _get_audio_duration(audio_path: str) -> float:
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
+        capture_output=True, text=True, check=True,
+    )
+    return float(result.stdout.strip())
+
+
 @contextmanager
 def _as_channel_wav(audio_path: str, channel_idx: int):
     """Extract a single channel as 16kHz mono WAV."""
@@ -71,6 +80,28 @@ def _as_wav(audio_path: str):
             os.unlink(tmp.name)
 
 
+_MAX_SEG_DUR = 30.0  # GigaAM/Parakeet fail on inputs beyond ~5000 frames; keep chunks ≤30 s
+
+
+def _transcribe_in_chunks(model, wav_path: str, **recognize_kwargs) -> str:
+    """Chunk a long WAV into _MAX_SEG_DUR slices and concatenate transcriptions."""
+    dur = _get_audio_duration(wav_path)
+    parts = []
+    chunk_start = 0.0
+    while chunk_start < dur:
+        chunk_end = min(chunk_start + _MAX_SEG_DUR, dur)
+        with _extract_segment(wav_path, chunk_start, chunk_end) as chunk:
+            results = model.recognize(chunk, **recognize_kwargs)
+            if isinstance(results, list):
+                text = " ".join(r if isinstance(r, str) else r.text for r in results if r).strip()
+            else:
+                text = (results if isinstance(results, str) else results.text or "").strip()
+            if text:
+                parts.append(text)
+        chunk_start = chunk_end
+    return " ".join(parts)
+
+
 class BaseTranscriber(ABC):
     """Base class for all transcribers."""
 
@@ -120,8 +151,10 @@ class ParakeetTranscriber(BaseTranscriber):
         self.model = onnx_asr.load_model(model_name)
 
     def transcribe(self, audio_path: str, language: str | None = None) -> str:
+        kwargs = {"language": language} if language else {}
         with _as_wav(audio_path) as wav:
-            kwargs = {"language": language} if language else {}
+            if _get_audio_duration(wav) > _MAX_SEG_DUR:
+                return _transcribe_in_chunks(self.model, wav, **kwargs)
             results = self.model.recognize(wav, **kwargs)
         if isinstance(results, list):
             return " ".join(r if isinstance(r, str) else r.text for r in results if r).strip()
@@ -144,6 +177,8 @@ class GigaAmTranscriber(BaseTranscriber):
 
     def transcribe(self, audio_path: str, language: str | None = None) -> str:
         with _as_wav(audio_path) as wav:
+            if _get_audio_duration(wav) > _MAX_SEG_DUR:
+                return _transcribe_in_chunks(self.model, wav)
             results = self.model.recognize(wav)
         if isinstance(results, list):
             return " ".join(r if isinstance(r, str) else r.text for r in results if r).strip()
@@ -275,15 +310,15 @@ def diarize_and_transcribe(
 
     result = []
     for start, end, label in merged:
-        if end - start < 0.3:
+        if end - start < 0.5:
             continue
-        text = _transcribe_segment(transcriber, audio_path, start, end, language=language)
+        try:
+            text = _transcribe_segment(transcriber, audio_path, start, end, language=language)
+        except Exception:
+            continue
         if text.strip():
             result.append(DiarizedSegment(start, end, f"СПИКЕР_{label + 1}", text.strip()))
     return result
-
-
-_MAX_SEG_DUR = 30.0  # секунды; GigaAM/Parakeet падают на длинных сегментах
 
 
 def _transcribe_segment(transcriber: "BaseTranscriber", audio_path: str, start: float, end: float, language: str | None = None) -> str:

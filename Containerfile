@@ -7,6 +7,12 @@ WORKDIR /app
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
+# Build tools required for webrtcvad (C extension, dep of resemblyzer)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy only dependency files first for layer caching
 COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
@@ -24,9 +30,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user
-RUN groupadd -r voirec && useradd -r -g voirec voirec
-
 WORKDIR /app
 
 # Copy installed venv from builder
@@ -41,10 +44,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Numba/librosa: кэш JIT в writable директорию
 ENV NUMBA_CACHE_DIR=/tmp/numba_cache
 
-# Models are downloaded on first use; cache dir must be writable
-RUN mkdir -p /app/hf_cache && chown -R voirec:voirec /app/hf_cache
-
-USER voirec
+RUN mkdir -p /app/hf_cache
 
 EXPOSE 8000
 
