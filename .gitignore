@@ -40,3 +40,7 @@ models/
 *.mp3
 *.flac
 *.ogg
+
+# etc
+.etc/
+in/
